@@ -1,0 +1,226 @@
+import javax.swing.*;
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.awt.event.*;
+import java.util.Hashtable;
+
+public class ColorBlindnessFilter {
+    private JFrame filterFrame;
+    private JFrame controlFrame;
+    private Timer timer;
+    private ColorBlindnessType currentFilter = ColorBlindnessType.NONE;
+    private Robot robot;
+    private Rectangle screenRect;
+
+    public enum ColorBlindnessType {
+        NONE("Нормальный"), 
+        PROTANOPIA("Протанопия (красно-зелёная)"), 
+        DEUTERANOPIA("Дейтеранопия (красно-зелёная)"), 
+        TRITANOPIA("Тританопия (сине-жёлтая)"), 
+        GRAYSCALE("Оттенки серого");
+
+        private final String description;
+        ColorBlindnessType(String description) {
+            this.description = description;
+        }
+        @Override
+        public String toString() {
+            return description;
+        }
+    }
+
+    public ColorBlindnessFilter() {
+        try {
+            robot = new Robot();
+            screenRect = new Rectangle(Toolkit.getDefaultToolkit().getScreenSize());
+        } catch (AWTException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(null, "Ошибка инициализации программы");
+            System.exit(1);
+        }
+
+        createFilterFrame();
+        createControlFrame();
+
+        timer = new Timer(150, e -> filterFrame.repaint());
+        timer.start();
+    }
+
+    private void createFilterFrame() {
+        filterFrame = new JFrame();
+        filterFrame.setTitle("Color Filter Overlay");
+        filterFrame.setUndecorated(true);
+        filterFrame.setExtendedState(JFrame.MAXIMIZED_BOTH);
+        filterFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        filterFrame.setAlwaysOnTop(true);
+        filterFrame.setBackground(new Color(0, 0, 0, 0));
+        filterFrame.setOpacity(0.7f);
+
+        filterFrame.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    controlFrame.setVisible(!controlFrame.isVisible());
+                }
+            }
+        });
+    }
+
+    private void createControlFrame() {
+        controlFrame = new JFrame("Управление фильтром");
+        controlFrame.setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
+        controlFrame.setSize(300, 250);
+        controlFrame.setLayout(new BorderLayout());
+        controlFrame.setAlwaysOnTop(true);
+
+        // Панель выбора фильтра
+        JPanel filterPanel = new JPanel(new GridLayout(0, 1));
+        ButtonGroup group = new ButtonGroup();
+
+        for (ColorBlindnessType type : ColorBlindnessType.values()) {
+            JRadioButton radio = new JRadioButton(type.toString());
+            radio.setActionCommand(type.name());
+            radio.addActionListener(e -> {
+                currentFilter = ColorBlindnessType.valueOf(e.getActionCommand());
+            });
+            group.add(radio);
+            filterPanel.add(radio);
+            
+            if (type == ColorBlindnessType.NONE) {
+                radio.setSelected(true);
+            }
+        }
+
+        // Панель прозрачности
+        JSlider opacitySlider = new JSlider(10, 100, 70);
+        opacitySlider.setMajorTickSpacing(20);
+        opacitySlider.setPaintTicks(true);
+        opacitySlider.setPaintLabels(true);
+        
+        Hashtable<Integer, JLabel> labelTable = new Hashtable<>();
+        labelTable.put(10, new JLabel("10%"));
+        labelTable.put(50, new JLabel("50%"));
+        labelTable.put(100, new JLabel("100%"));
+        opacitySlider.setLabelTable(labelTable);
+        
+        opacitySlider.addChangeListener(e -> {
+            filterFrame.setOpacity(opacitySlider.getValue() / 100f);
+        });
+
+        // Панель кнопок
+        JPanel buttonPanel = new JPanel(new GridLayout(1, 2, 5, 5));
+        
+        JButton hideButton = new JButton("Скрыть панель");
+        hideButton.addActionListener(e -> controlFrame.setVisible(false));
+        
+        JButton exitButton = new JButton("Выход");
+        exitButton.addActionListener(e -> System.exit(0));
+        
+        buttonPanel.add(hideButton);
+        buttonPanel.add(exitButton);
+
+        // Собираем интерфейс
+        JPanel content = new JPanel(new BorderLayout(10, 10));
+        content.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        content.add(new JLabel("Выберите тип фильтра:"), BorderLayout.NORTH);
+        content.add(filterPanel, BorderLayout.CENTER);
+        content.add(opacitySlider, BorderLayout.SOUTH);
+
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.add(content, BorderLayout.CENTER);
+        mainPanel.add(buttonPanel, BorderLayout.SOUTH);
+
+        controlFrame.add(mainPanel);
+
+        // Позиционируем окно управления
+        Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+        controlFrame.setLocation(screenSize.width - controlFrame.getWidth() - 20, 20);
+    }
+
+    public void show() {
+        filterFrame.setVisible(true);
+        controlFrame.setVisible(true);
+        
+        // Рисуем фильтр
+        filterFrame.getContentPane().add(new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                try {
+                    BufferedImage screenImage = robot.createScreenCapture(screenRect);
+                    BufferedImage filteredImage = applyColorBlindnessFilter(screenImage, currentFilter);
+                    g.drawImage(filteredImage, 0, 0, null);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+    }
+
+    private BufferedImage applyColorBlindnessFilter(BufferedImage image, ColorBlindnessType filterType) {
+        if (filterType == ColorBlindnessType.NONE) {
+            return image;
+        }
+
+        int width = image.getWidth();
+        int height = image.getHeight();
+        BufferedImage result = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+
+        int[] pixels = image.getRGB(0, 0, width, height, null, 0, width);
+        
+        for (int i = 0; i < pixels.length; i++) {
+            Color original = new Color(pixels[i]);
+            Color filtered = applyFilter(original, filterType);
+            pixels[i] = filtered.getRGB();
+        }
+        
+        result.setRGB(0, 0, width, height, pixels, 0, width);
+        return result;
+    }
+
+    private Color applyFilter(Color color, ColorBlindnessType filterType) {
+        int r = color.getRed();
+        int g = color.getGreen();
+        int b = color.getBlue();
+
+        switch (filterType) {
+            case PROTANOPIA:
+                return new Color(
+                    clip(0.567 * r + 0.433 * g),
+                    clip(0.558 * r + 0.442 * g),
+                    clip(0.242 * g + 0.758 * b)
+                );
+            case DEUTERANOPIA:
+                return new Color(
+                    clip(0.625 * r + 0.375 * g),
+                    clip(0.700 * r + 0.300 * g),
+                    clip(0.300 * g + 0.700 * b)
+                );
+            case TRITANOPIA:
+                return new Color(
+                    clip(0.950 * r + 0.050 * g),
+                    clip(0.433 * g + 0.567 * b),
+                    clip(0.475 * g + 0.525 * b)
+                );
+            case GRAYSCALE:
+                int gray = clip(0.299 * r + 0.587 * g + 0.114 * b);
+                return new Color(gray, gray, gray);
+            default:
+                return color;
+        }
+    }
+
+    private int clip(double value) {
+        return (int) Math.max(0, Math.min(255, value));
+    }
+
+    public static void main(String[] args) {
+        System.setProperty("sun.java2d.opengl", "true");
+        System.setProperty("sun.java2d.noddraw", "true");
+
+        SwingUtilities.invokeLater(() -> {
+            ColorBlindnessFilter filter = new ColorBlindnessFilter();
+            filter.show();
+        });
+    }
+}
